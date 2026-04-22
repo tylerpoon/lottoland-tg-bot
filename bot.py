@@ -661,6 +661,43 @@ async def cmd_runscore_now(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> No
     await daily_tick(ctx)
 
 
+HELP_PLAYER = [
+    ("/join [name]", "Join the league (pre-draft only)"),
+    ("/players", "List players"),
+    ("/pick &lt;n&gt;", "Draft a number on your turn"),
+    ("/draft", "Show draft progress and who's on the clock"),
+    ("/roster", "Show everyone's numbers"),
+    ("/freeagents", "List unowned numbers"),
+    ("/standings", "Show current standings"),
+    ("/recent [key]", "Last 10 draws (optionally for one lottery)"),
+    ("/swap &lt;drop&gt; &lt;add&gt;", "Drop one of your numbers, pick up a free agent"),
+    ("/trade &lt;give&gt; &lt;get&gt;", "Reply to a player to propose a trade"),
+    ("/trades", "List your pending trades"),
+    ("/cancel_trade &lt;id&gt;", "Cancel a trade you proposed"),
+    ("/status", "League state, player count, lock window"),
+    ("/help", "Show this message"),
+]
+
+HELP_ADMIN = [
+    ("/setup", "Bind current group chat as the league chat"),
+    ("/startdraft", "Randomize order and begin the snake draft"),
+    ("/setlock HH:MM HH:MM", "Change the roster-lock window"),
+    ("/runscore_now", "Trigger the scrape+score+post job immediately"),
+    ("/end_season confirm", "End the season and crown a winner"),
+]
+
+
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    lines = ["<b>Commands:</b>"]
+    for cmd, desc in HELP_PLAYER:
+        lines.append(f"  <code>{cmd}</code> — {desc}")
+    if is_admin(update.effective_user.id):
+        lines.append("\n<b>Admin:</b>")
+        for cmd, desc in HELP_ADMIN:
+            lines.append(f"  <code>{cmd}</code> — {desc}")
+    await reply(update, "\n".join(lines))
+
+
 # ---------- Entry point ----------
 
 def main() -> None:
@@ -690,6 +727,8 @@ def main() -> None:
     app.add_handler(CommandHandler("cancel_trade", cmd_cancel_trade))
     app.add_handler(CommandHandler("end_season", cmd_end_season))
     app.add_handler(CommandHandler("runscore_now", cmd_runscore_now))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("start", cmd_help))
     app.add_handler(CallbackQueryHandler(on_trade_callback, pattern=r"^trade:"))
 
     app.job_queue.run_daily(
