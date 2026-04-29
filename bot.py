@@ -284,17 +284,71 @@ async def cmd_draft(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await reply(update, "\n".join(lines))
 
 
+def number_score_breakdown() -> tuple[dict[int, float], dict[tuple[int, int], float]]:
+    """Attribute points to individual numbers.
+
+    Splits each tier's main-ball points equally across the numbers that
+    matched in that draw. Bonus contribution goes to the bonus number.
+    Returns (by_number, by_player_number) — the latter is per scoring player,
+    so points stay with whoever owned the number at score time.
+    """
+    by_number: dict[int, float] = {}
+    by_player_number: dict[tuple[int, int], float] = {}
+    for r in db.all_scores_with_draw():
+        mult = BY_KEY[r["lottery_key"]].multiplier
+        mains: list[int] = json.loads(r["main_matches"])
+        bonus_pts = (scoring.BONUS_POINTS * mult) if r["bonus_match"] else 0.0
+        main_pts = r["points"] - bonus_pts
+        if mains:
+            share = main_pts / len(mains)
+            for n in mains:
+                by_number[n] = by_number.get(n, 0.0) + share
+                by_player_number[(r["player_id"], n)] = (
+                    by_player_number.get((r["player_id"], n), 0.0) + share
+                )
+        if r["bonus_match"] and r["draw_bonus"] is not None:
+            n = r["draw_bonus"]
+            by_number[n] = by_number.get(n, 0.0) + bonus_pts
+            by_player_number[(r["player_id"], n)] = (
+                by_player_number.get((r["player_id"], n), 0.0) + bonus_pts
+            )
+    return by_number, by_player_number
+
+
 async def cmd_roster(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     rosters = db.all_rosters()
     players = {p["id"]: p for p in db.list_players()}
+    _, by_pn = number_score_breakdown()
     if not rosters:
         await reply(update, "No rosters yet.")
         return
     lines = ["<b>Rosters:</b>"]
     for pid, p in players.items():
         nums = rosters.get(pid, [])
-        num_str = ", ".join(str(n) for n in nums) if nums else "(none)"
+        if nums:
+            parts = [f"{n} ({fmt_points(by_pn.get((pid, n), 0.0))})" for n in nums]
+            num_str = ", ".join(parts)
+        else:
+            num_str = "(none)"
         lines.append(f"  {escape(p['name'])}: {num_str}")
+    await reply(update, "\n".join(lines))
+
+
+async def cmd_topscorers(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    by_number, _ = number_score_breakdown()
+    if not by_number:
+        await reply(update, "No scores yet.")
+        return
+    items = sorted(by_number.items(), key=lambda kv: -kv[1])
+    lines = ["<b>Top scoring numbers:</b>"]
+    for n, pts in items[:20]:
+        owner_pid = db.owner_of(n)
+        owner_str = ""
+        if owner_pid is not None:
+            owner = db.get_player(owner_pid)
+            if owner:
+                owner_str = f" — {escape(owner['name'])}"
+        lines.append(f"  {n}: {fmt_points(pts)}{owner_str}")
     await reply(update, "\n".join(lines))
 
 
@@ -669,6 +723,7 @@ HELP_PLAYER = [
     ("/roster", "Show everyone's numbers"),
     ("/freeagents", "List unowned numbers"),
     ("/standings", "Show current standings"),
+    ("/topscorers", "Top-scoring numbers since season start"),
     ("/recent [key]", "Last 10 draws (optionally for one lottery)"),
     ("/swap &lt;drop&gt; &lt;add&gt;", "Drop one of your numbers, pick up a free agent"),
     ("/trade &lt;give&gt; &lt;get&gt;", "Reply to a player to propose a trade"),
@@ -720,6 +775,7 @@ def main() -> None:
     app.add_handler(CommandHandler("roster", cmd_roster))
     app.add_handler(CommandHandler("freeagents", cmd_freeagents))
     app.add_handler(CommandHandler("standings", cmd_standings))
+    app.add_handler(CommandHandler("topscorers", cmd_topscorers))
     app.add_handler(CommandHandler("recent", cmd_recent))
     app.add_handler(CommandHandler("swap", cmd_swap))
     app.add_handler(CommandHandler("trade", cmd_trade))

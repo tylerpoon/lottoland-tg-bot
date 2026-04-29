@@ -350,6 +350,17 @@ def record_score(
         )
 
 
+def all_scores_with_draw() -> list[sqlite3.Row]:
+    """Score rows joined with their draw's lottery_key and bonus number."""
+    with tx() as conn:
+        return conn.execute(
+            """SELECT s.player_id, s.points, s.main_matches, s.bonus_match,
+                      d.lottery_key, d.bonus AS draw_bonus
+                 FROM scores s
+                 JOIN draws d ON d.id = s.draw_id"""
+        ).fetchall()
+
+
 def standings() -> list[tuple[int, str, float]]:
     with tx() as conn:
         rows = conn.execute(
