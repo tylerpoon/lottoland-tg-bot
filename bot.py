@@ -322,15 +322,18 @@ async def cmd_roster(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not rosters:
         await reply(update, "No rosters yet.")
         return
-    lines = ["<b>Rosters:</b>"]
+    lines: list[str] = []
     for pid, p in players.items():
+        if lines:
+            lines.append("")
+        lines.append(f"<b>{escape(p['name'])}</b>")
         nums = rosters.get(pid, [])
-        if nums:
-            parts = [f"{n} ({fmt_points(by_pn.get((pid, n), 0.0))})" for n in nums]
-            num_str = ", ".join(parts)
-        else:
-            num_str = "(none)"
-        lines.append(f"  {escape(p['name'])}: {num_str}")
+        if not nums:
+            lines.append("  (none)")
+            continue
+        for n in nums:
+            pts = by_pn.get((pid, n), 0.0)
+            lines.append(f"  <code>{n:>2}</code> — {fmt_points(pts)}")
     await reply(update, "\n".join(lines))
 
 
@@ -341,7 +344,7 @@ async def cmd_topscorers(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         return
     items = sorted(by_number.items(), key=lambda kv: -kv[1])
     lines = ["<b>Top scoring numbers:</b>"]
-    for n, pts in items[:20]:
+    for n, pts in items[:10]:
         owner_pid = db.owner_of(n)
         owner_str = ""
         if owner_pid is not None:
