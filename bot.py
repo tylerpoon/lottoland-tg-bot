@@ -606,6 +606,7 @@ async def daily_tick(ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     players_by_id = {p["id"]: p for p in db.list_players()}
+    daily_points_by_player = {pid: 0.0 for pid in players_by_id}
     blocks: list[str] = []
     new_draw_ids.sort(key=lambda t: (t[2].draw_date, t[0].key))
 
@@ -620,6 +621,9 @@ async def daily_tick(ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if player_scores:
             for ps in sorted(player_scores, key=lambda s: -s.points):
                 db.record_score(draw_id, ps.player_id, ps.points, ps.main_matches, ps.bonus_match)
+                daily_points_by_player[ps.player_id] = (
+                    daily_points_by_player.get(ps.player_id, 0.0) + ps.points
+                )
                 p = players_by_id.get(ps.player_id)
                 if not p:
                     continue
@@ -631,13 +635,29 @@ async def daily_tick(ctx: ContextTypes.DEFAULT_TYPE) -> None:
             block.append("  • no matches")
         blocks.append("\n".join(block))
 
+    daily_lines = ["<b>Today's points:</b>"]
+    for pid, p in sorted(
+        players_by_id.items(),
+        key=lambda item: (-daily_points_by_player.get(item[0], 0.0), item[1]["name"].lower()),
+    ):
+        daily_lines.append(
+            f"  {escape(p['name'])} — +{fmt_points(daily_points_by_player.get(pid, 0.0))}"
+        )
+
     # Standings
     stand = db.standings()
     stand_lines = ["<b>Standings:</b>"]
     for i, (_pid, name, total) in enumerate(stand, 1):
         stand_lines.append(f"  {i}. {escape(name)} — {fmt_points(total)}")
 
-    text = "🎰 <b>Daily summary</b>\n\n" + "\n\n".join(blocks) + "\n\n" + "\n".join(stand_lines)
+    text = (
+        "🎰 <b>Daily summary</b>\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n"
+        + "\n".join(daily_lines)
+        + "\n\n"
+        + "\n".join(stand_lines)
+    )
     # Telegram has a 4096-char message limit; chunk if needed.
     for chunk in _chunks(text, 3800):
         await ctx.bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML)
