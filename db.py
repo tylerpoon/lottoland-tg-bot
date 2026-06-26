@@ -350,6 +350,23 @@ def record_score(
         )
 
 
+def all_draws_raw() -> list[sqlite3.Row]:
+    """All recorded draws (lottery_key, mains JSON, bonus)."""
+    with tx() as conn:
+        return conn.execute("SELECT lottery_key, mains, bonus FROM draws").fetchall()
+
+
+def points_by_lottery_player() -> list[sqlite3.Row]:
+    """Sum of points grouped by (lottery_key, player_id)."""
+    with tx() as conn:
+        return conn.execute(
+            """SELECT d.lottery_key, s.player_id, SUM(s.points) AS total
+                 FROM scores s
+                 JOIN draws d ON d.id = s.draw_id
+                GROUP BY d.lottery_key, s.player_id"""
+        ).fetchall()
+
+
 def all_scores_with_draw() -> list[sqlite3.Row]:
     """Score rows joined with their draw's lottery_key and bonus number."""
     with tx() as conn:

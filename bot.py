@@ -337,6 +337,65 @@ async def cmd_roster(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await reply(update, "\n".join(lines))
 
 
+async def cmd_frequency(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    limit = 20
+    if ctx.args:
+        try:
+            limit = max(1, int(ctx.args[0]))
+        except ValueError:
+            await reply(update, "Usage: <code>/frequency [count]</code>")
+            return
+    main_count: dict[int, int] = {n: 0 for n in range(POOL_MIN, POOL_MAX + 1)}
+    bonus_count: dict[int, int] = {n: 0 for n in range(POOL_MIN, POOL_MAX + 1)}
+    for r in db.all_draws_raw():
+        for n in json.loads(r["mains"]):
+            if POOL_MIN <= n <= POOL_MAX:
+                main_count[n] += 1
+        b = r["bonus"]
+        if b is not None and POOL_MIN <= b <= POOL_MAX:
+            bonus_count[b] += 1
+    if not any(main_count.values()) and not any(bonus_count.values()):
+        await reply(update, "No draws recorded yet.")
+        return
+    items = sorted(
+        main_count.keys(),
+        key=lambda n: (-(main_count[n] + bonus_count[n]), -main_count[n], n),
+    )
+    lines = [f"<b>Number frequency</b> (top {limit}):"]
+    for n in items[:limit]:
+        m, b = main_count[n], bonus_count[n]
+        bonus_str = f" (+{b} bonus)" if b else ""
+        lines.append(f"  <code>{n:>2}</code> — {m}{bonus_str}")
+    await reply(update, "\n".join(lines))
+
+
+async def cmd_lottery_points(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    rows = db.points_by_lottery_player()
+    if not rows:
+        await reply(update, "No scores yet.")
+        return
+    players = {p["id"]: p for p in db.list_players()}
+    by_lottery: dict[str, list[tuple[int, float]]] = {}
+    totals: dict[str, float] = {}
+    for r in rows:
+        by_lottery.setdefault(r["lottery_key"], []).append((r["player_id"], r["total"]))
+        totals[r["lottery_key"]] = totals.get(r["lottery_key"], 0.0) + r["total"]
+    order = sorted(by_lottery.keys(), key=lambda k: -totals[k])
+    blocks: list[str] = []
+    for key in order:
+        lt = BY_KEY[key]
+        mult = f" ({lt.multiplier}×)" if lt.multiplier != 1 else ""
+        header = f"<b>{escape(lt.name)}</b>{mult} — {fmt_points(totals[key])}"
+        body = [header]
+        for pid, total in sorted(by_lottery[key], key=lambda t: -t[1]):
+            name = players.get(pid, {"name": f"#{pid}"})["name"]
+            body.append(f"  {escape(name)}: {fmt_points(total)}")
+        blocks.append("\n".join(body))
+    text = "\n\n".join(blocks)
+    for chunk in _chunks(text, 3800):
+        await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
+
+
 async def cmd_topscorers(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     by_number, _ = number_score_breakdown()
     if not by_number:
@@ -747,6 +806,8 @@ HELP_PLAYER = [
     ("/freeagents", "List unowned numbers"),
     ("/standings", "Show current standings"),
     ("/topscorers", "Top-scoring numbers since season start"),
+    ("/frequency [n]", "How often each number has been drawn (default top 20)"),
+    ("/lottery_points", "Points per player, broken down by lottery"),
     ("/recent [key]", "Last 10 draws (optionally for one lottery)"),
     ("/swap &lt;drop&gt; &lt;add&gt;", "Drop one of your numbers, pick up a free agent"),
     ("/trade &lt;give&gt; &lt;get&gt;", "Reply to a player to propose a trade"),
@@ -799,6 +860,8 @@ def main() -> None:
     app.add_handler(CommandHandler("freeagents", cmd_freeagents))
     app.add_handler(CommandHandler("standings", cmd_standings))
     app.add_handler(CommandHandler("topscorers", cmd_topscorers))
+    app.add_handler(CommandHandler("frequency", cmd_frequency))
+    app.add_handler(CommandHandler("lottery_points", cmd_lottery_points))
     app.add_handler(CommandHandler("recent", cmd_recent))
     app.add_handler(CommandHandler("swap", cmd_swap))
     app.add_handler(CommandHandler("trade", cmd_trade))
